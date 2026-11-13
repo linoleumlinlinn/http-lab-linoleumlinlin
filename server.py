@@ -5,15 +5,31 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 
+class CatalogServer(HTTPServer):
+    request_queue_size = 32
+
+
+catalog_cache = {}
+
+
 def search(path, query):
-    with path.open(encoding="utf-8") as source:
-        records = [json.loads(line) for line in source]
-    matches = []
-    for record in records:
-        if query.lower() in record["title"].lower():
-            matches.append(record)
-    matches.sort(key=lambda record: (-record["score"], record["id"]))
-    return {"total": len(matches), "items": matches[:10]}
+    modified_at = path.stat().st_mtime_ns
+    saved_time, records = catalog_cache.get(path, (None, None))
+    if saved_time != modified_at:
+        with path.open(encoding="utf-8") as source:
+            records = [json.loads(line) for line in source]
+        records.sort(key=lambda record: (-record["score"], record["id"]))
+        records = [(record["title"].lower(), record) for record in records]
+        catalog_cache[path] = (modified_at, records)
+    total = 0
+    items = []
+    query = query.lower()
+    for title_lower, record in records:
+        if query in title_lower:
+            total += 1
+            if total <= 10:
+                items.append(record)
+    return {"total": total, "items": items}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -55,7 +71,7 @@ def main():
     args = parser.parse_args()
     if not args.data.is_file():
         parser.error(f"catalog does not exist: {args.data}")
-    with HTTPServer((args.host, args.port), Handler) as server:
+    with CatalogServer((args.host, args.port), Handler) as server:
         server.data_path = args.data
         print(f"listening on http://{args.host}:{server.server_port}", flush=True)
         try:
