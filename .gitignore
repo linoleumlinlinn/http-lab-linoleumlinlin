@@ -1,0 +1,7 @@
+__pycache__/
+*.py[cod]
+data/
+results/
+*.log
+perf.data*
+perf-stat*.txt
